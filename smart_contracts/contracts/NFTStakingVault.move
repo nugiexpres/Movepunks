@@ -4,18 +4,23 @@ module Staking::NFTStakingVault {
     use Std::Signer;
     use Std::Option;
     use Std::Vector;
+    use Movepunks::NFTContract;
+    use MovepunksToken::RewardTokenContract;
 
+    /// Struct to represent a stake, containing the owner's address, staking timestamp, and last claimed timestamp.
     struct Stake {
         owner: address,
         staked_at: u64,
-        last_claimed_at: Option<u64>, // None = belum pernah klaim
+        last_claimed_at: Option<u64>, // None = never claimed
     }
 
+    /// Struct to represent the staking vault.
     struct Vault has key {
         total_items_staked: u64,
         stakes: vector<(u64, Stake)>, // token_id => Stake
     }
 
+    /// Initialize the staking vault for an account.
     public fun initialize_vault(account: &signer) {
         move_to(account, Vault {
             total_items_staked: 0,
@@ -23,7 +28,7 @@ module Staking::NFTStakingVault {
         });
     }
 
-    /// Fungsi untuk staking NFT
+    /// Stake NFTs by transferring them to the vault.
     public fun stake(
         account: &signer,
         token_ids: vector<u64>,
@@ -32,7 +37,6 @@ module Staking::NFTStakingVault {
         let vault = borrow_global_mut<Vault>(Signer::address_of(account));
         let sender = Signer::address_of(account);
 
-        // Iterasi melalui token_ids untuk staking
         let len = Vector::length(&token_ids);
         let now = Timestamp::now_seconds();
 
@@ -40,7 +44,7 @@ module Staking::NFTStakingVault {
             let token_id = Vector::borrow(&token_ids, i);
             assert!(
                 NFTContract::owner_of(&nft_contract, *token_id) == sender,
-                1 // Error: Anda bukan pemilik NFT
+                1 // Error: Not the owner of the NFT
             );
 
             NFTContract::transfer(&mut nft_contract, sender, address_of(vault), *token_id);
@@ -57,7 +61,7 @@ module Staking::NFTStakingVault {
         vault.total_items_staked = vault.total_items_staked + len as u64;
     }
 
-    /// Fungsi untuk klaim reward
+    /// Claim rewards for staked NFTs. Claims can only be made on Thursdays; otherwise, rewards are forfeited.
     public fun claim(
         account: &signer,
         token_ids: vector<u64>,
@@ -71,20 +75,25 @@ module Staking::NFTStakingVault {
             let token_id = Vector::borrow(&token_ids, i);
             let (index, stake) = find_stake(&vault.stakes, *token_id);
 
-            assert!(stake.owner == sender, 2); // Error: Anda bukan pemilik token
-            assert!(is_thursday(now), 3); // Error: Reward hanya bisa diklaim pada hari Kamis
+            assert!(stake.owner == sender, 2); // Error: Not the owner of the token
+            if !is_thursday(now) {
+                // If not Thursday, forfeit the reward by removing the stake
+                Vector::remove(&mut vault.stakes, index);
+                NFTContract::transfer(&mut nft_contract, address_of(vault), sender, *token_id);
+                continue;
+            }
 
             let staking_period = now - stake.staked_at;
 
             let reward = calculate_reward(staking_period);
             RewardTokenContract::mint(reward_contract, sender, reward);
 
-            // Update waktu klaim terakhir
+            // Update the last claimed timestamp
             vault.stakes[index].1.last_claimed_at = Option::some(now);
         }
     }
 
-    /// Fungsi untuk menghitung reward
+    /// Calculate the daily staking reward based on the staking period.
     fun calculate_reward(staking_period: u64): u64 {
         if staking_period <= 30 * 24 * 3600 {
             1
@@ -97,13 +106,13 @@ module Staking::NFTStakingVault {
         }
     }
 
-    /// Fungsi untuk memeriksa apakah hari ini Kamis
+    /// Check if the current day is Thursday.
     fun is_thursday(timestamp: u64): bool {
-        let day_of_week = (timestamp / (24 * 3600) + 4) % 7; // 0 = Kamis
+        let day_of_week = (timestamp / (24 * 3600) + 4) % 7; // 0 = Thursday
         day_of_week == 0
     }
 
-    /// Fungsi utilitas untuk menemukan stake dalam vault
+    /// Utility function to find a stake in the vault.
     fun find_stake(
         stakes: &vector<(u64, Stake)>,
         token_id: u64,
@@ -115,6 +124,7 @@ module Staking::NFTStakingVault {
                 return (i, stake);
             }
         }
-        assert!(false, 4); // Error: Token tidak ditemukan
+        assert!(false, 4); // Error: Token not found
     }
 }
+
