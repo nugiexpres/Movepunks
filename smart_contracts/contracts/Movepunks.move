@@ -14,7 +14,7 @@ module Movepunks::Movepunks {
     const E_TOKEN_NOT_FOUND: u64 = 6;
 
     // Constants
-    const BASE_EXTENSION: string = ".json";
+    const BASE_EXTENSION: vector<u8> = b".json";
 
     // Resource to manage Movepunks state
     struct MovepunksState has key {
